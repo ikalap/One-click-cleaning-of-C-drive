@@ -368,7 +368,7 @@ class CleanerLogic:
 
         # 使用ThreadPoolExecutor并发运行扫描任务
         # 根据测试调整max_workers，None通常默认为os.cpu_count（）*5
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        with concurrent.futures.ThreadPoolExecutor() as executor:
             # 提交所有任务
             future_to_task = {executor.submit(task, results): task for task in scan_tasks}
 
