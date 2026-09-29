@@ -9,12 +9,11 @@ C盘清理工具 - 配置文件
 VERSION = "1.0.0"
 
 # 应用程序名称
-APP_NAME = "C盘清理工具"
+APP_NAME = "媛媛专用C盘清理工具"
 
 # 默认配置
 DEFAULT_CONFIG = {
     # 安全选项
-    "simulate_mode": True,      # 模拟模式（不实际删除文件）
     "backup_files": True,       # 删除前备份文件
     
     # 清理选项

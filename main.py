@@ -114,15 +114,6 @@ class CleanerApp(tk.Tk):
         safety_frame = ttk.LabelFrame(main_frame, text="安全选项", padding="5")
         safety_frame.pack(fill=tk.X, pady=5)
 
-        # 模拟模式选项
-        simulate_frame = ttk.Frame(safety_frame)
-        simulate_frame.pack(fill=tk.X, pady=2)
-
-        self.simulate_var = tk.BooleanVar(value=False)  # 默认关闭模拟模式
-        self.simulate_check = ttk.Checkbutton(simulate_frame, text="模拟模式 (不实际删除文件)",
-                                             variable=self.simulate_var)
-        self.simulate_check.pack(side=tk.LEFT)
-
         # 备份选项
         backup_frame = ttk.Frame(safety_frame)
         backup_frame.pack(fill=tk.X, pady=2)
@@ -397,19 +388,17 @@ class CleanerApp(tk.Tk):
 
         # 获取选项
         options = {
-            'simulate': self.simulate_var.get(),
             'backup': self.backup_var.get(),
             'backup_dir': self.backup_dir_var.get()
         }
         self.cleaner.set_options(options)
 
         # 确认清理
-        if not options['simulate']:
-            confirm = messagebox.askyesno("确认清理", 
-                                        f"您确定要清理选中的 {len(self.selected_items)} 个项目吗？\n"
-                                        f"这将永久删除这些文件。")
-            if not confirm:
-                return
+        confirm = messagebox.askyesno("确认清理", 
+                                    f"您确定要清理选中的 {len(self.selected_items)} 个项目吗？\n"
+                                    f"这将永久删除这些文件。")
+        if not confirm:
+            return
 
         # 禁用按钮
         self.scan_button.config(state=tk.DISABLED)
@@ -484,19 +473,17 @@ class CleanerApp(tk.Tk):
 
         # 获取选项
         options = {
-            'simulate': self.simulate_var.get(),
             'backup': self.backup_var.get(),
             'backup_dir': self.backup_dir_var.get()
         }
         self.cleaner.set_options(options)
 
         # 确认清理
-        if not options['simulate']:
-            confirm = messagebox.askyesno("确认一键清理", 
-                                        f"您确定要清理所有 {len(all_items)} 个项目吗？\n"
-                                        f"这将永久删除这些文件。")
-            if not confirm:
-                return
+        confirm = messagebox.askyesno("确认一键清理", 
+                                    f"您确定要清理所有 {len(all_items)} 个项目吗？\n"
+                                    f"这将永久删除这些文件。")
+        if not confirm:
+            return
 
         # 禁用按钮
         self.scan_button.config(state=tk.DISABLED)
@@ -564,10 +551,7 @@ class CleanerApp(tk.Tk):
         freed_space = results.get('freed_space', 0)
         errors = results.get('errors', [])
 
-        if self.simulate_var.get():
-            message = f"模拟清理完成，可释放空间: {self.format_size(freed_space)}"
-        else:
-            message = f"清理完成，已释放空间: {self.format_size(freed_space)}"
+        message = f"清理完成，已释放空间: {self.format_size(freed_space)}"
 
         if errors:
             message += f"，{len(errors)} 个错误"
@@ -594,10 +578,7 @@ class CleanerApp(tk.Tk):
         freed_space = results.get('freed_space', 0)
         errors = results.get('errors', [])
 
-        if self.simulate_var.get():
-            message = f"模拟清理完成，可释放空间: {self.format_size(freed_space)}"
-        else:
-            message = f"一键清理完成，已释放空间: {self.format_size(freed_space)}"
+        message = f"一键清理完成，已释放空间: {self.format_size(freed_space)}"
 
         if errors:
             message += f"，{len(errors)} 个错误"
@@ -612,20 +593,14 @@ class CleanerApp(tk.Tk):
             messagebox.showwarning("清理错误", f"清理过程中发生 {len(errors)} 个错误\n\n{error_details}")
 
         # 显示清理结果
-        if not self.simulate_var.get():  # 非模拟模式下询问是否重新扫描
-            result = messagebox.askquestion("清理完成", 
-                                         f"一键清理完成\n\n已释放空间: {self.format_size(freed_space)}\n错误数量: {len(errors)}\n\n是否需要重新扫描系统?")
-            # 更新磁盘信息
-            self.update_disk_info()
-            
-            # 仅当用户确认时才重新扫描
-            if result == 'yes':
-                self.start_scan()
-        else:
-            # 模拟模式下只显示结果，不询问重新扫描
-            messagebox.showinfo("清理完成", f"模拟清理完成\n\n可释放空间: {self.format_size(freed_space)}\n错误数量: {len(errors)}")
-            # 更新磁盘信息
-            self.update_disk_info()
+        result = messagebox.askquestion("清理完成", 
+                                     f"一键清理完成\n\n已释放空间: {self.format_size(freed_space)}\n错误数量: {len(errors)}\n\n是否需要重新扫描系统?")
+        # 更新磁盘信息
+        self.update_disk_info()
+        
+        # 仅当用户确认时才重新扫描
+        if result == 'yes':
+            self.start_scan()
 
     @staticmethod
     def format_size(size_bytes):
