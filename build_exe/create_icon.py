@@ -8,8 +8,8 @@ import os
 def create_icon():
     """创建一个简单的图标文件"""
     # 确保icons目录存在
-    if not os.path.exists('icons'):
-        os.makedirs('icons')
+    if not os.path.exists('../icons'):
+        os.makedirs('../icons')
     
     # 创建一个512x512的图像
     img = Image.new('RGBA', (512, 512), color=(0, 0, 0, 0))
@@ -32,12 +32,12 @@ def create_icon():
         draw.text((206, 186), "C", fill=(255, 255, 255))
     
     # 保存为PNG
-    png_path = os.path.join('icons', 'cleaner.png')
+    png_path = os.path.join('../icons', 'cleaner.png')
     img.save(png_path)
     print(f"已创建PNG图标: {os.path.abspath(png_path)}")
     
     # 保存为ICO
-    ico_path = os.path.join('icons', 'cleaner.ico')
+    ico_path = os.path.join('../icons', 'cleaner.ico')
     img.save(ico_path, format='ICO', sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
     print(f"已创建ICO图标: {os.path.abspath(ico_path)}")
 
