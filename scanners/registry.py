@@ -76,9 +76,3 @@ def build_strategies(config=None):
         cls = load_strategy_class(key)
         strategies.append(cls(config=config))
     return strategies
-
-
-def build_scan_chain(config=None):
-    """构建扫描责任链"""
-    from .base import ScanChain
-    return ScanChain(build_strategies(config))

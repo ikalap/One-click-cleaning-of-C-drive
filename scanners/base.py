@@ -6,7 +6,6 @@
 
 - ScanStrategy：策略模式抽象基类
 - ScanContext：扫描上下文，携带共享结果与安全路径判断
-- ScanHandler / StrategyScanHandler / ScanChain：责任链模式实现
 """
 
 import os
@@ -92,69 +91,3 @@ class ScanStrategy(ABC):
         if isinstance(cfg, dict):
             return cfg.get(self.key, True)
         return self.key in cfg
-
-
-class ScanHandler(ABC):
-    """责任链节点抽象基类（责任链模式）"""
-
-    def __init__(self):
-        self._next = None
-
-    def set_next(self, handler):
-        self._next = handler
-        return handler
-
-    @abstractmethod
-    def can_handle(self, config):
-        """判断当前节点是否需要处理"""
-
-    @abstractmethod
-    def handle(self, context):
-        """执行当前节点的实际处理逻辑"""
-
-    def process(self, context, config=None):
-        """责任链入口：能处理则处理，然后传递给下一个节点"""
-        if self.can_handle(config):
-            self.handle(context)
-        if self._next is not None:
-            self._next.process(context, config)
-
-
-class StrategyScanHandler(ScanHandler):
-    """将扫描策略包装为责任链节点"""
-
-    def __init__(self, strategy):
-        super().__init__()
-        self.strategy = strategy
-
-    def can_handle(self, config):
-        return self.strategy.is_enabled(config)
-
-    def handle(self, context):
-        self.strategy.scan(context)
-
-
-class ScanChain:
-    """扫描责任链：按注册顺序串联各策略节点"""
-
-    def __init__(self, strategies):
-        self.handlers = []
-        self.head = None
-        tail = None
-        for strategy in strategies:
-            handler = StrategyScanHandler(strategy)
-            self.handlers.append(handler)
-            if tail is None:
-                self.head = handler
-            else:
-                tail.set_next(handler)
-            tail = handler
-
-    def enabled_handlers(self, config=None):
-        """返回所有按配置启用的节点（可并发执行）"""
-        return [h for h in self.handlers if h.can_handle(config)]
-
-    def run(self, context, config=None):
-        """顺序执行整条责任链"""
-        if self.head is not None:
-            self.head.process(context, config)

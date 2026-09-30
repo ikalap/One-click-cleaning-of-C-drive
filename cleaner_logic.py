@@ -4,8 +4,8 @@
 """
 C盘清理工具 - 核心清理逻辑
 
-扫描部分使用「策略模式 + 责任链模式」组织，各扫描类型位于 scanners/ 包下：
-- scanners/base.py      ：ScanStrategy（策略接口）、ScanContext、ScanChain（责任链）
+扫描部分使用「策略模式」组织，各扫描类型位于 scanners/ 包下：
+- scanners/base.py      ：ScanStrategy（策略接口）、ScanContext
 - scanners/registry.py  ：key -> import path 注册表，按配置动态加载策略类
 - scanners/*.py         ：每个扫描类型一个类，独立文件
 """
@@ -19,7 +19,6 @@ import concurrent.futures
 
 from scanners import (
     ALL_RESULT_KEYS,
-    ScanChain,
     ScanContext,
     build_strategies,
 )
@@ -299,25 +298,24 @@ class CleanerLogic:
         # 1. 策略模式：按注册表动态实例化各扫描策略类（scanners/*.py）
         strategies = build_strategies(config)
 
-        # 2. 责任链模式：串联策略节点，并按配置过滤出启用的节点
-        chain = ScanChain(strategies)
-        handlers = chain.enabled_handlers(config)
+        # 2. 按配置过滤出启用的扫描策略
+        enabled_strategies = [s for s in strategies if s.is_enabled(config)]
 
-        # 3. 并发执行启用的扫描策略（每个 handler 委托给对应的策略类）
+        # 3. 并发执行启用的扫描策略
         context = ScanContext(results=results, safe_paths=self.safe_paths)
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            future_to_handler = {
-                executor.submit(handler.handle, context): handler
-                for handler in handlers
+            future_to_strategy = {
+                executor.submit(strategy.scan, context): strategy
+                for strategy in enabled_strategies
             }
 
-            for future in concurrent.futures.as_completed(future_to_handler):
-                handler = future_to_handler[future]
+            for future in concurrent.futures.as_completed(future_to_strategy):
+                strategy = future_to_strategy[future]
                 try:
                     future.result()  # 任务期间发生的任何异常
-                    logger.info(f"Task {handler.strategy.key} completed successfully.")
+                    logger.info(f"Task {strategy.key} completed successfully.")
                 except Exception as exc:
-                    logger.error(f'Task {handler.strategy.key} generated an exception: {exc}')
+                    logger.error(f'Task {strategy.key} generated an exception: {exc}')
 
         logger.info(f"扫描完成，找到 {sum(len(items) for items in results.values())} 个可清理项目")
         return results
