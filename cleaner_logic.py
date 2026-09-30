@@ -15,6 +15,7 @@ import shutil
 import tempfile
 import logging
 import datetime
+import threading
 import concurrent.futures
 
 from scanners import (
@@ -279,13 +280,19 @@ class CleanerLogic:
             logger.error(f"恢复备份失败: {e}")
             return False
 
-    def scan_system(self, enabled_items=None):
+    def scan_system(self, enabled_items=None, progress_callback=None):
         """扫描系统中可清理的文件（根据配置动态加载扫描策略）
 
         参数：
             enabled_items: 可选，dict 或集合，指定启用的扫描项。
                           例如 {'temp': True, 'cache': False} 或 {'temp', 'cache'}。
                           为 None 时使用 self.options['scan_items']（默认全部启用）。
+            progress_callback: 可选，扫描进度回调。扫描器开始/完成时各调用一次，
+                          签名为 callback(completed, total, active, finished_key, items)：
+                          completed 已完成的扫描器数量，total 启用的扫描器总数，
+                          active 当前正在扫描的扫描器键列表，
+                          finished_key 刚完成的扫描器键（开始通知时为 None），
+                          items 该扫描器找到的项目列表（开始通知时为 []）。
         """
         logger.info("开始扫描系统")
 
@@ -300,12 +307,43 @@ class CleanerLogic:
 
         # 2. 按配置过滤出启用的扫描策略
         enabled_strategies = [s for s in strategies if s.is_enabled(config)]
+        total = len(enabled_strategies)
+
+        # 进度状态（被多个扫描线程共享，需要加锁）
+        state_lock = threading.Lock()
+        state = {'completed': 0, 'active': set()}
+
+        def notify(finished_key=None, items=None):
+            """向 UI 上报当前进度快照"""
+            if not progress_callback:
+                return
+            with state_lock:
+                completed = state['completed']
+                active = sorted(state['active'])
+            progress_callback(completed, total, active, finished_key, items or [])
+
+        def run_strategy(strategy):
+            """执行单个扫描器，并在开始/结束时上报进度"""
+            with state_lock:
+                state['active'].add(strategy.key)
+            notify()
+            try:
+                strategy.scan(context)
+            finally:
+                with state_lock:
+                    state['active'].discard(strategy.key)
+                    state['completed'] += 1
+                # 无论成功与否都算完成一个扫描器，并实时上报结果
+                notify(strategy.key, list(results.get(strategy.key, [])))
+
+        # 通知起始状态（0/total）
+        notify()
 
         # 3. 并发执行启用的扫描策略
         context = ScanContext(results=results, safe_paths=self.safe_paths)
         with concurrent.futures.ThreadPoolExecutor() as executor:
             future_to_strategy = {
-                executor.submit(strategy.scan, context): strategy
+                executor.submit(run_strategy, strategy): strategy
                 for strategy in enabled_strategies
             }
 

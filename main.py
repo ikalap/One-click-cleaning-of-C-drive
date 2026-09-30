@@ -7,6 +7,7 @@ C盘清理工具 - 安全高效地清理C盘不必要的文件
 
 import sys
 import os
+import time
 import logging
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -15,6 +16,54 @@ import queue
 from config import APP_NAME, VERSION
 from cleaner_logic import CleanerLogic
 from backup_manager import BackupManagerWindow
+from scanners import ALL_RESULT_KEYS
+
+# 结果分类 key -> 显示名称（与 scanners 注册表保持一致的展示顺序）
+CATEGORY_NAMES = {
+    # 基本清理
+    'temp': "临时文件",
+    'recycle': "回收站",
+    'cache': "浏览器缓存",
+    'logs': "系统日志",
+    'updates': "Windows更新缓存",
+    'thumbnails': "缩略图缓存",
+
+    # 扩展清理
+    'prefetch': "预读取文件",
+    'old_windows': "旧Windows文件",
+    'error_reports': "错误报告",
+    'service_packs': "服务包备份",
+    'memory_dumps': "内存转储文件",
+    'font_cache': "字体缓存",
+    'disk_cleanup': "磁盘清理备份",
+
+    # 新增安全清理项
+    'app_cache': "应用程序缓存",
+    'media_cache': "媒体播放器缓存",
+    'search_index': "搜索索引临时文件",
+    'backup_temp': "备份临时文件",
+    'update_temp': "更新临时文件",
+    'driver_backup': "驱动备份",
+    'app_crash': "应用程序崩溃转储",
+    'app_logs': "应用程序日志",
+    'recent_items': "最近使用的文件列表",
+    'notification': "Windows通知缓存",
+    'dns_cache': "DNS缓存",
+    'network_cache': "网络缓存",
+    'printer_temp': "打印机临时文件",
+    'device_temp': "设备临时文件",
+    'windows_defender': "Windows Defender缓存",
+    'store_cache': "Windows Store缓存",
+    'onedrive_cache': "OneDrive缓存",
+
+    # 新增用户请求的清理项
+    'downloads': "下载文件夹(立即清理)",
+    'installer_cache': "安装程序缓存(30天前)",
+    'delivery_opt': "Windows传递优化缓存(立即清理)",
+
+    # 大文件扫描
+    'large_files': "大文件 (>100MB)",
+}
 
 # 配置日志
 logging.basicConfig(
@@ -37,6 +86,12 @@ class CleanerApp(tk.Tk):
         self.cleaner = CleanerLogic()
         self.scan_results = {}
         self.selected_items = []
+        # 已在结果树中展示的分类：key -> Treeview 节点 id
+        self._tree_category_ids = {}
+        # 扫描进度状态与计时
+        self._scan_start_time = None
+        self._scan_ticking = False
+        self._scan_progress = {'completed': 0, 'total': 0, 'active': []}
 
         self.create_widgets()
         self.update_disk_info()
@@ -81,7 +136,7 @@ class CleanerApp(tk.Tk):
         self.progress_bar.pack(fill=tk.X)
         self.progress_bar.pack_forget()  # 初始隐藏
 
-        self.status_label = ttk.Label(self.progress_frame, text="")
+        self.status_label = ttk.Label(self.progress_frame, text="", wraplength=760, justify=tk.LEFT)
         self.status_label.pack(anchor=tk.W)
 
         # 结果区域
@@ -155,9 +210,20 @@ class CleanerApp(tk.Tk):
         self.select_all_button.config(state=tk.DISABLED)
         self.deselect_all_button.config(state=tk.DISABLED)
         self.result_tree.delete(*self.result_tree.get_children())
+        self._tree_category_ids = {}
         self.progress_bar.pack(fill=tk.X)
         self.progress_bar.start()
-        self.status_label.config(text="正在扫描系统，请稍候...")
+
+        # 预估计启用的扫描器总数，先显示 0/总数
+        scan_items = self.cleaner.options.get('scan_items', {})
+        total = sum(1 for enabled in scan_items.values() if enabled) if scan_items else len(ALL_RESULT_KEYS)
+
+        # 初始化扫描进度与计时，并启动实时刷新
+        self._scan_start_time = time.monotonic()
+        self._scan_progress = {'completed': 0, 'total': total, 'active': []}
+        self._scan_ticking = True
+        self._render_scan_status()
+        self.after(100, self._tick_scan_status)
 
         # 创建一个队列用于线程通信
         self.scan_queue = queue.Queue()
@@ -173,8 +239,14 @@ class CleanerApp(tk.Tk):
     def _scan_thread_task(self):
         """在单独的线程中执行扫描任务"""
         try:
+            def on_progress(completed, total, active, finished_key, items):
+                # 通过队列把扫描进度安全地传回主线程
+                self.scan_queue.put(
+                    ('progress', (completed, total, active, finished_key, items))
+                )
+
             # 执行扫描
-            results = self.cleaner.scan_system()
+            results = self.cleaner.scan_system(progress_callback=on_progress)
             # 将结果放入队列
             self.scan_queue.put(('success', results))
         except Exception as e:
@@ -182,42 +254,104 @@ class CleanerApp(tk.Tk):
             logger.error(f"扫描过程中出错: {e}")
             self.scan_queue.put(('error', str(e)))
 
+    def _tick_scan_status(self):
+        """定时刷新扫描状态栏，让耗时持续累加"""
+        if not self._scan_ticking:
+            return
+        self._render_scan_status()
+        self.after(100, self._tick_scan_status)
+
+    def _render_scan_status(self):
+        """根据当前扫描进度渲染状态栏文本"""
+        progress = self._scan_progress
+        text = f"扫描中 {progress['completed']}/{progress['total']}"
+
+        # 实时显示当前正在扫描的项目
+        active = progress.get('active') or []
+        if active:
+            shown = active[:5]
+            names = "、".join(CATEGORY_NAMES.get(k, k) for k in shown)
+            if len(active) > len(shown):
+                names += f" 等{len(active)}项"
+            text += f" · 当前扫描项目: {names}"
+
+        # 实时累加已耗时
+        if self._scan_start_time is not None:
+            elapsed = time.monotonic() - self._scan_start_time
+            text += f" · 耗时 {elapsed:.1f}s"
+
+        self.status_label.config(text=text)
+
     def _check_scan_queue(self):
-        """检查扫描线程队列"""
+        """检查扫描线程队列（实时处理进度与结果）"""
+        finished = False
         try:
-            # 非阻塞式获取，如果没有数据会抛出queue.Empty异常
-            status, data = self.scan_queue.get_nowait()
-            
-            # 扫描完成或出错
-            if status == 'success':
-                self.scan_results = data
-                self.on_scan_finished()
-            elif status == 'error':
-                messagebox.showerror("扫描错误", f"扫描过程中出错: {data}")
-                self.progress_bar.stop()
-                self.progress_bar.pack_forget()
-                self.scan_button.config(state=tk.NORMAL)
-                
+            # 一次性清空当前队列，避免进度消息积压
+            while True:
+                status, data = self.scan_queue.get_nowait()
+
+                if status == 'progress':
+                    completed, total, active, finished_key, items = data
+                    # 仅更新进度状态并立即刷新一次，耗时的持续累加由定时器负责
+                    self._scan_progress = {
+                        'completed': completed,
+                        'total': total,
+                        'active': active,
+                    }
+                    self._render_scan_status()
+                    # 扫描器一完成就立即把它发现的项目展示到列表
+                    if finished_key and items:
+                        self.add_category_to_tree(finished_key, items)
+
+                elif status == 'success':
+                    self.scan_results = data
+                    self.on_scan_finished()
+                    finished = True
+                    break
+
+                elif status == 'error':
+                    self._scan_ticking = False
+                    messagebox.showerror("扫描错误", f"扫描过程中出错: {data}")
+                    self.progress_bar.stop()
+                    self.progress_bar.pack_forget()
+                    self.scan_button.config(state=tk.NORMAL)
+                    finished = True
+                    break
+
         except queue.Empty:
             # 队列为空，说明扫描还在进行，继续等待
+            pass
+
+        if not finished:
             self.after(100, self._check_scan_queue)
 
     def on_scan_finished(self):
         """扫描完成后的处理"""
+        # 停止耗时累加，冻结总耗时
+        self._scan_ticking = False
+        elapsed = 0.0
+        if self._scan_start_time is not None:
+            elapsed = time.monotonic() - self._scan_start_time
+            self._scan_start_time = None
+        elapsed_text = f" · 耗时 {elapsed:.1f}s"
+
         self.progress_bar.stop()
         self.progress_bar.pack_forget()
         self.scan_button.config(state=tk.NORMAL)
 
         if not any(self.scan_results.values()):
-            self.status_label.config(text="扫描完成，未发现可清理项目")
+            self.status_label.config(text=f"扫描完成，未发现可清理项目{elapsed_text}")
             return
 
         # 计算总大小
         total_size = sum(item['size'] for category in self.scan_results.values() for item in category)
-        self.status_label.config(text=f"扫描完成，发现可释放空间: {self.format_size(total_size)}")
+        self.status_label.config(text=f"扫描完成，发现可释放空间: {self.format_size(total_size)}{elapsed_text}")
 
-        # 填充结果树
-        self.populate_results_tree()
+        # 扫描过程中已实时展示结果，这里仅补齐可能遗漏的分类
+        for key, items in self.scan_results.items():
+            if key not in self._tree_category_ids:
+                self.add_category_to_tree(key, items)
+
         self.clean_button.config(state=tk.NORMAL)
         self.select_all_button.config(state=tk.NORMAL)
         self.deselect_all_button.config(state=tk.NORMAL)
@@ -226,91 +360,64 @@ class CleanerApp(tk.Tk):
         self.update_disk_info()
 
     def populate_results_tree(self):
-        """填充结果树"""
-        categories = {
-            # 基本清理
-            'temp': "临时文件",
-            'recycle': "回收站",
-            'cache': "浏览器缓存",
-            'logs': "系统日志",
-            'updates': "Windows更新缓存",
-            'thumbnails': "缩略图缓存",
-
-            # 扩展清理
-            'prefetch': "预读取文件",
-            'old_windows': "旧Windows文件",
-            'error_reports': "错误报告",
-            'service_packs': "服务包备份",
-            'memory_dumps': "内存转储文件",
-            'font_cache': "字体缓存",
-            'disk_cleanup': "磁盘清理备份",
-
-            # 新增安全清理项
-            'app_cache': "应用程序缓存",
-            'media_cache': "媒体播放器缓存",
-            'search_index': "搜索索引临时文件",
-            'backup_temp': "备份临时文件",
-            'update_temp': "更新临时文件",
-            'driver_backup': "驱动备份",
-            'app_crash': "应用程序崩溃转储",
-            'app_logs': "应用程序日志",
-            'recent_items': "最近使用的文件列表",
-            'notification': "Windows通知缓存",
-            'dns_cache': "DNS缓存",
-            'network_cache': "网络缓存",
-            'printer_temp': "打印机临时文件",
-            'device_temp': "设备临时文件",
-            'windows_defender': "Windows Defender缓存",
-            'store_cache': "Windows Store缓存",
-            'onedrive_cache': "OneDrive缓存",
-
-            # 新增用户请求的清理项
-            'downloads': "下载文件夹(立即清理)",
-            'installer_cache': "安装程序缓存(30天前)",
-            'delivery_opt': "Windows传递优化缓存(立即清理)",
-
-            # 大文件扫描
-            'large_files': "大文件 (>100MB)"
-        }
-
+        """填充结果树（全量重建）"""
+        self.result_tree.delete(*self.result_tree.get_children())
+        self._tree_category_ids = {}
         for category, items in self.scan_results.items():
-            if not items:
-                continue
+            self.add_category_to_tree(category, items)
 
-            # 计算类别总大小
-            category_size = sum(item['size'] for item in items)
-            category_name = categories.get(category, category)
+    def add_category_to_tree(self, category, items):
+        """将一个扫描分类的结果实时添加到结果树中"""
+        if not items:
+            return None
 
-            # 添加类别节点
-            category_id = self.result_tree.insert(
-                "", "end", text=category_name,
-                values=(category_name, self.format_size(category_size), "")
-            )
+        # 已展示过则不重复添加
+        existing = self._tree_category_ids.get(category)
+        if existing and self.result_tree.exists(existing):
+            return existing
 
-            # 添加文件节点
-            for item in items:
-                file_name = os.path.basename(item['path'])
+        # 计算类别总大小
+        category_size = sum(item['size'] for item in items)
+        category_name = CATEGORY_NAMES.get(category, category)
 
-                # 大文件显示更多信息
-                if category == 'large_files' and 'modified' in item and 'extension' in item:
-                    # 对于大文件，显示文件名、大小、修改时间和文件类型
-                    file_info = f"{file_name} [修改时间: {item['modified']}] [类型: {item['extension']}]"
-                    self.result_tree.insert(
-                        category_id, "end", text=file_name,
-                        values=(file_info, self.format_size(item['size']), item['path']),
-                        tags=("item",)
-                    )
-                else:
-                    # 对于普通文件，只显示文件名和大小
-                    self.result_tree.insert(
-                        category_id, "end", text=file_name,
-                        values=(file_name, self.format_size(item['size']), item['path']),
-                        tags=("item",)
-                    )
+        # 添加类别节点
+        category_id = self.result_tree.insert(
+            "", "end", text=category_name,
+            values=(category_name, self.format_size(category_size), "")
+        )
+        self._tree_category_ids[category] = category_id
 
-        # 展开所有节点
-        for item_id in self.result_tree.get_children():
-            self.result_tree.item(item_id, open=True)
+        # 添加文件节点
+        for item in items:
+            file_name = os.path.basename(item['path'])
+
+            # 大文件显示更多信息
+            if category == 'large_files' and 'modified' in item and 'extension' in item:
+                file_info = f"{file_name} [修改时间: {item['modified']}] [类型: {item['extension']}]"
+                self.result_tree.insert(
+                    category_id, "end", text=file_name,
+                    values=(file_info, self.format_size(item['size']), item['path']),
+                    tags=("item",)
+                )
+            else:
+                self.result_tree.insert(
+                    category_id, "end", text=file_name,
+                    values=(file_name, self.format_size(item['size']), item['path']),
+                    tags=("item",)
+                )
+
+        self.result_tree.item(category_id, open=True)
+        self._reorder_tree_categories()
+        return category_id
+
+    def _reorder_tree_categories(self):
+        """按扫描器注册表顺序排列结果树中的分类节点"""
+        index = 0
+        for key in ALL_RESULT_KEYS:
+            node_id = self._tree_category_ids.get(key)
+            if node_id and self.result_tree.exists(node_id):
+                self.result_tree.move(node_id, "", index)
+                index += 1
 
     def start_clean(self):
         """开始清理选中的项目"""
