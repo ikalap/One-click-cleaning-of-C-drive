@@ -19,7 +19,7 @@ import threading
 
 from .scan_strategy import ScanStrategy, logger
 from .io_scan_strategy import DirectoryScanner
-from .targets import SCAN_TARGETS
+from .scan_targets_config import SCAN_TARGETS
 
 try:
     import mftparser

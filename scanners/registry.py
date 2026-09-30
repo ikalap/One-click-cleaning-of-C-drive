@@ -3,7 +3,7 @@
 
 """扫描策略注册表
 
-所有扫描目标集中定义在 targets.py（单一数据源）：
+所有扫描目标集中定义在 scan_targets_config.py（单一数据源）：
 
 - 通用目标：由单个 mft.MftDirectoryScanner 实例统一负责，
   优先使用 MFT，不支持时自动回退到 os.walk
@@ -15,7 +15,7 @@ build_strategies() 只实例化「1 个通用策略 + N 个专用策略」，
 
 import importlib
 
-from .targets import SCAN_TARGETS
+from .scan_targets_config import SCAN_TARGETS
 from .mft_scan_strategy import MftDirectoryScanner
 
 # 所有扫描结果的 key，与 UI 分类保持一致（顺序即展示顺序）

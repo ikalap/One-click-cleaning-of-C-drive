@@ -10,7 +10,7 @@
 - mode='path'：把每个路径作为一条结果记录，目录取其内所有文件的总大小
   （可选附带文件数量），文件取自身大小。
 
-配置字段说明见 targets.py 顶部文档。
+配置字段说明见 scan_targets_config.py 顶部文档。
 """
 
 import os
