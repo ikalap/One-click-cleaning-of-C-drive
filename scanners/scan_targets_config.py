@@ -13,7 +13,7 @@
     older_than_days  可选，仅收集修改时间早于 N 天前的文件
     count_files      可选，为 'path' 记录附带文件数量
 - 专用扫描项：dedicated = 策略类的 import path，用于无法用配置表达的逻辑
-    （浏览器缓存、媒体缓存、应用日志、安装程序缓存、大文件）
+    （应用日志、安装程序缓存、大文件）
 
 新增「按路径扫描目录或文件」的清理项时，只需在 SCAN_TARGETS 中加一条配置，
 无需再新增 Python 文件。
@@ -35,7 +35,11 @@ SCAN_TARGETS = {
     },
     'cache': {
         'display_name': '浏览器缓存',
-        'dedicated': 'scanners.dedicated.browser_cache.BrowserCacheScanner',
+        'mode': 'path',
+        'paths': [
+            r'%LOCALAPPDATA%\Google\Chrome\User Data\Default\Cache',
+            r'%LOCALAPPDATA%\Microsoft\Edge\User Data\Default\Cache',
+        ],
     },
     'logs': {
         'display_name': '系统日志',
@@ -130,7 +134,14 @@ SCAN_TARGETS = {
     },
     'media_cache': {
         'display_name': '媒体播放器缓存',
-        'dedicated': 'scanners.dedicated.media_cache.MediaCacheScanner',
+        'mode': 'path',
+        'paths': [
+            r'%LOCALAPPDATA%\Microsoft\Media Player',
+            r'%APPDATA%\vlc\art',
+            r'%LOCALAPPDATA%\Spotify\Storage',
+            r'%APPDATA%\Spotify\cache',
+            r'%LOCALAPPDATA%\Microsoft\Windows\Explorer\iconcache*',
+        ],
     },
     'search_index': {
         'display_name': '搜索索引临时文件',

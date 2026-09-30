@@ -10,8 +10,8 @@
 - mft_scan_strategy.py      ：MFT 后端与 MFT 优先的通用扫描器（不支持时回退 generic）
 - scan_strategy_context.py ：扫描策略上下文，管理策略实例、协调 MFT/IO 后端并上报进度，
                 含结果 key 定义（ALL_RESULT_KEYS）与专用策略实例化
-- dedicated/  ：无法用配置表达的专用扫描器（浏览器缓存、媒体缓存、
-                应用日志、安装程序缓存、大文件等）
+- dedicated/  ：无法用配置表达的专用扫描器（应用日志、
+                安装程序缓存、大文件等）
 """
 
 from .scan_strategy import (
