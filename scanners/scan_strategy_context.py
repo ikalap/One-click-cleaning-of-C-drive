@@ -106,12 +106,13 @@ class ScanStrategyContext:
     4. 统一执行扫描、并发调度并向 UI 上报进度，最终返回扫描结果。
     """
 
-    def __init__(self, safe_paths=None, results=None, prefer_mft=True):
+    def __init__(self, safe_paths=None, results=None, prefer_mft=True, skip_locked=False):
         """
         参数：
             safe_paths: 安全路径列表，用于过滤系统关键目录
             results:    结果字典，缺省时按 ALL_RESULT_KEYS 初始化
             prefer_mft: 是否优先使用 MFT 策略（False 时直接走 IO）
+            skip_locked: 扫描时是否探测并跳过当前不可删除（被占用/无权限）的文件
         """
         self.safe_paths = safe_paths or []
         self.results = (
@@ -119,6 +120,9 @@ class ScanStrategyContext:
             else {key: [] for key in ALL_RESULT_KEYS}
         )
         self.prefer_mft = prefer_mft
+        self.skip_locked = skip_locked
+        # 扫描阶段因被占用/无权限而跳过的文件数
+        self.skipped_locked = 0
 
         # MFT 后端状态：懒加载，当前上下文只探测/加载一次
         self._mft_lock = threading.Lock()
@@ -135,6 +139,10 @@ class ScanStrategyContext:
     def add(self, key, item):
         """向结果字典中追加一条记录"""
         self.results.setdefault(key, []).append(item)
+
+    def mark_skipped_locked(self):
+        """记录一个因被占用/无权限而在扫描阶段被跳过的文件"""
+        self.skipped_locked += 1
 
     def extend(self, key, items):
         """向结果字典中批量追加记录"""
@@ -275,6 +283,8 @@ class ScanStrategyContext:
         logger.info(
             f"扫描完成，找到 "
             f"{sum(len(items) for items in results.values())} 个可清理项目"
+            + (f"，扫描时跳过 {self.skipped_locked} 个被占用/无权限的文件"
+               if self.skipped_locked else "")
         )
         return results
 

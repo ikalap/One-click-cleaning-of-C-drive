@@ -12,6 +12,7 @@ import fnmatch
 import datetime
 
 from .scan_strategy import ScanStrategy, logger
+from .file_lock import is_deletable
 from .scan_targets_config import SCAN_TARGETS
 
 try:
@@ -142,6 +143,10 @@ def _distribute(entries, context):
             if mode == 'files':
                 exts = ext_sets[key]
                 if exts and os.path.splitext(path)[1].lower() not in exts:
+                    continue
+                # 扫描阶段剔除当前删不掉的文件（被占用/无权限）
+                if context.skip_locked and not is_deletable(path):
+                    context.mark_skipped_locked()
                     continue
                 file_items[key].append({'path': path, 'size': size, 'type': key})
             else:

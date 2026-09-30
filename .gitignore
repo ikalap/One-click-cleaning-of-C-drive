@@ -24,6 +24,9 @@ var/
 *.log
 logs/
 
+# 运行时用户配置
+config.json
+
 # 备份文件
 backups/
 

@@ -15,7 +15,8 @@ import threading
 import queue
 from config import APP_NAME, VERSION
 from cleaner_logic import CleanerLogic
-from backup_manager import BackupManagerWindow
+from ui.backup_manager import BackupManagerWindow
+from ui.settings_dialog import SettingsDialog
 from scanners import ALL_RESULT_KEYS, CATEGORY_NAMES
 
 # 配置日志
@@ -81,6 +82,9 @@ class CleanerApp(tk.Tk):
         self.deselect_all_button = ttk.Button(button_frame, text="取消全选", command=self.deselect_all_items, state=tk.DISABLED)
         self.deselect_all_button.pack(side=tk.LEFT, padx=5)
 
+        self.settings_button = ttk.Button(button_frame, text="配置", command=self.open_settings)
+        self.settings_button.pack(side=tk.LEFT, padx=5)
+
         # 进度条
         self.progress_frame = ttk.Frame(main_frame)
         self.progress_frame.pack(fill=tk.X, pady=5)
@@ -117,6 +121,9 @@ class CleanerApp(tk.Tk):
         # 放置Treeview和滚动条
         self.result_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # 选中变化时同步"清理选中项"按钮的可用状态
+        self.result_tree.bind("<<TreeviewSelect>>", self._on_tree_selection_change)
 
         # 安全选项区域
         safety_frame = ttk.LabelFrame(main_frame, text="安全选项", padding="5")
@@ -291,13 +298,22 @@ class CleanerApp(tk.Tk):
         self.progress_bar.pack_forget()
         self.scan_button.config(state=tk.NORMAL)
 
+        # 扫描阶段被跳过（被占用/无权限）的文件数
+        skipped_locked = getattr(self.cleaner, 'last_skipped_locked', 0)
+        skipped_text = f" · 已忽略 {skipped_locked} 个被占用/无权限文件" if skipped_locked else ""
+
         if not any(self.scan_results.values()):
-            self.status_label.config(text=f"扫描完成，未发现可清理项目{elapsed_text}")
+            self.status_label.config(
+                text=f"扫描完成，未发现可清理项目{skipped_text}{elapsed_text}"
+            )
             return
 
         # 计算总大小
         total_size = sum(item['size'] for category in self.scan_results.values() for item in category)
-        self.status_label.config(text=f"扫描完成，发现可释放空间: {self.format_size(total_size)}{elapsed_text}")
+        self.status_label.config(
+            text=f"扫描完成，发现可释放空间: {self.format_size(total_size)}"
+                 f"{skipped_text}{elapsed_text}"
+        )
 
         # 扫描过程中已实时展示结果，这里仅补齐可能遗漏的分类
         for key, items in self.scan_results.items():
@@ -371,25 +387,35 @@ class CleanerApp(tk.Tk):
                 self.result_tree.move(node_id, "", index)
                 index += 1
 
+    def _on_tree_selection_change(self, event=None):
+        """根据当前选中的文件节点更新"清理选中项"按钮状态"""
+        has_selected_file = any(
+            self.result_tree.parent(item_id)
+            for item_id in self.result_tree.selection()
+        )
+        self.clean_button.config(
+            state=tk.NORMAL if has_selected_file else tk.DISABLED
+        )
+
     def start_clean(self):
         """开始清理选中的项目"""
-        # 获取选中的项目
+        # 获取选中的项目（基于 Treeview 实际选中行）
         self.selected_items = []
         
         # 分类节点 id -> 结果 key（避免依赖显示名称反查）
         id_to_key = {cid: key for key, cid in self._tree_category_ids.items()}
 
-        for category_id in self.result_tree.get_children():
+        for item_id in self.result_tree.selection():
+            # 仅处理文件节点（有父节点即为文件/子项，分类节点无父节点）
+            category_id = self.result_tree.parent(item_id)
             category_key = id_to_key.get(category_id)
             if not category_key:
                 continue
-            for item_id in self.result_tree.get_children(category_id):
-                if self.result_tree.item(item_id, 'values')[-1] == '是':  # 检查"选中"列
-                    item_path = self.result_tree.item(item_id, 'values')[2]  # 路径在第三列
-                    for item in self.scan_results.get(category_key, []):
-                        if item['path'] == item_path:
-                            self.selected_items.append(item)
-                            break
+            item_path = self.result_tree.item(item_id, 'values')[2]  # 路径在第三列
+            for item in self.scan_results.get(category_key, []):
+                if item['path'] == item_path:
+                    self.selected_items.append(item)
+                    break
 
         if not self.selected_items:
             messagebox.showinfo("清理", "请先选择需要清理的项目")
@@ -559,15 +585,25 @@ class CleanerApp(tk.Tk):
 
         freed_space = results.get('freed_space', 0)
         errors = results.get('errors', [])
+        skipped = results.get('skipped', [])
 
         message = f"清理完成，已释放空间: {self.format_size(freed_space)}"
-
+        if skipped:
+            message += f"，{len(skipped)} 个文件正在使用已跳过"
         if errors:
             message += f"，{len(errors)} 个错误"
 
         self.status_label.config(text=message)
 
-        # 如果有错误，显示错误日志
+        # 被占用的文件属于预期内的跳过，不算错误
+        if skipped:
+            messagebox.showinfo(
+                "清理完成",
+                f"有 {len(skipped)} 个项目正被其他程序使用，已自动跳过。\n\n"
+                f"这类文件通常会在相关程序退出后自动清理。",
+            )
+
+        # 仅真正的失败才弹错误警告
         if errors:
             error_details = "\n".join([f"{err['path']}: {err['error']}" for err in errors[:10]])
             if len(errors) > 10:
@@ -586,15 +622,17 @@ class CleanerApp(tk.Tk):
 
         freed_space = results.get('freed_space', 0)
         errors = results.get('errors', [])
+        skipped = results.get('skipped', [])
 
         message = f"一键清理完成，已释放空间: {self.format_size(freed_space)}"
-
+        if skipped:
+            message += f"，{len(skipped)} 个文件正在使用已跳过"
         if errors:
             message += f"，{len(errors)} 个错误"
 
         self.status_label.config(text=message)
 
-        # 如果有错误，显示错误日志
+        # 仅真正的失败才弹错误警告
         if errors:
             error_details = "\n".join([f"{err['path']}: {err['error']}" for err in errors[:10]])
             if len(errors) > 10:
@@ -603,7 +641,8 @@ class CleanerApp(tk.Tk):
 
         # 显示清理结果
         result = messagebox.askquestion("清理完成", 
-                                     f"一键清理完成\n\n已释放空间: {self.format_size(freed_space)}\n错误数量: {len(errors)}\n\n是否需要重新扫描系统?")
+                                     f"一键清理完成\n\n已释放空间: {self.format_size(freed_space)}\n"
+                                     f"跳过(正在使用): {len(skipped)}\n错误数量: {len(errors)}\n\n是否需要重新扫描系统?")
         # 更新磁盘信息
         self.update_disk_info()
         
@@ -639,6 +678,15 @@ class CleanerApp(tk.Tk):
         """打开备份管理窗口"""
         BackupManagerWindow(self, self.cleaner)
 
+    def open_settings(self):
+        """打开软件配置弹窗（已打开则前置）"""
+        dialog = getattr(self, '_settings_dialog', None)
+        if dialog is not None and dialog.winfo_exists():
+            dialog.lift()
+            dialog.focus_set()
+            return
+        self._settings_dialog = SettingsDialog(self)
+
     def select_all_items(self):
         """全选所有项目"""
         # 选中所有类别
@@ -660,6 +708,7 @@ class CleanerApp(tk.Tk):
 
         # 更新清理按钮状态
         self.clean_button.config(state=tk.DISABLED)
+
 
 def main():
     """应用程序入口点"""

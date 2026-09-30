@@ -11,12 +11,14 @@ C盘清理工具 - 核心清理逻辑
 """
 
 import os
+import errno
 import shutil
 import tempfile
 import logging
 import datetime
 
 from scanners import ScanStrategyContext
+from app_config import get as get_config
 
 # 配置日志
 logging.basicConfig(
@@ -25,6 +27,24 @@ logging.basicConfig(
     filename='cleaner.log'
 )
 logger = logging.getLogger('CCleaner')
+
+
+class FileInUseError(Exception):
+    """文件/目录正被其他进程占用，无法删除。
+
+    属于预期内可安全跳过的情况（如 Temp 下正在使用的 .tmp），
+    不应作为清理错误上报。
+    """
+
+
+def is_file_in_use_error(exc):
+    """判断异常是否表示文件被占用/拒绝访问"""
+    if isinstance(exc, PermissionError):
+        return True
+    if getattr(exc, 'winerror', None) in (32, 33):  # 占用 / 锁定
+        return True
+    return getattr(exc, 'errno', None) in (errno.EACCES, errno.EPERM, errno.EBUSY)
+
 
 class CleanerLogic:
     """清理逻辑核心类"""
@@ -73,6 +93,9 @@ class CleanerLogic:
         # 备份限制
         self.max_backups = 5  # 最多保留几个备份
         self.max_backup_size = 1024 * 1024 * 1024  # 1GB
+
+        # 上次扫描因被占用/无权限而跳过的文件数（供界面展示）
+        self.last_skipped_locked = 0
 
         # 确保备份目录存在
         if not os.path.exists(self.backup_dir):
@@ -285,8 +308,15 @@ class CleanerLogic:
                           finished_key 刚完成的扫描器键（开始通知时为 None），
                           items 该扫描器找到的项目列表（开始通知时为 []）。
         """
-        strategy_context = ScanStrategyContext(safe_paths=self.safe_paths)
-        return strategy_context.scan(progress_callback=progress_callback)
+        strategy_context = ScanStrategyContext(
+            safe_paths=self.safe_paths,
+            prefer_mft=bool(get_config('fast_scan')),
+            skip_locked=bool(get_config('skip_locked_files')),
+        )
+        results = strategy_context.scan(progress_callback=progress_callback)
+        # 记录本次扫描跳过的被占用/无权限文件数，供界面展示
+        self.last_skipped_locked = strategy_context.skipped_locked
+        return results
 
     def clean_selected(self, items, progress_callback=None):
         """清理选中的项目"""
@@ -295,6 +325,7 @@ class CleanerLogic:
         results = {
             'cleaned_items': [],
             'errors': [],
+            'skipped': [],
             'freed_space': 0
         }
 
@@ -335,12 +366,21 @@ class CleanerLogic:
                     results['cleaned_items'].append(path)
                 elif os.path.isdir(path):
                     # 清理目录
-                    freed = self._clean_directory(path, current_backup_dir if self.options['backup'] else None)
+                    freed = self._clean_directory(
+                        path,
+                        current_backup_dir if self.options['backup'] else None,
+                        results['skipped'],
+                    )
                     results['freed_space'] += freed
                     results['cleaned_items'].append(path)
                 elif os.path.isfile(path):
                     # 清理文件
-                    freed = self._clean_file(path, current_backup_dir if self.options['backup'] else None)
+                    try:
+                        freed = self._clean_file(path, current_backup_dir if self.options['backup'] else None)
+                    except FileInUseError:
+                        logger.info(f"跳过正在使用的文件: {path}")
+                        results['skipped'].append({'path': path, 'reason': '文件正在使用'})
+                        continue
                     results['freed_space'] += freed
                     results['cleaned_items'].append(path)
 
@@ -351,11 +391,14 @@ class CleanerLogic:
                     'error': str(e)
                 })
 
-        logger.info(f"清理完成，释放空间: {results['freed_space']} 字节，错误: {len(results['errors'])}")
+        logger.info(
+            f"清理完成，释放空间: {results['freed_space']} 字节，"
+            f"错误: {len(results['errors'])}，跳过(占用): {len(results['skipped'])}"
+        )
         return results
 
     def _clean_file(self, file_path, backup_dir=None):
-        """清理单个文件"""
+        """清理单个文件。文件被占用时抛出 FileInUseError 供调用方跳过。"""
         try:
             if not os.path.exists(file_path):
                 return 0
@@ -373,64 +416,81 @@ class CleanerLogic:
                 except Exception as e:
                     logger.warning(f"备份文件 {file_path} 失败: {e}")
 
-            # 安全删除文件
-            try:
-                # 尝试使用Windows API移动到回收站
-                import ctypes
-                from ctypes import windll
-                from ctypes.wintypes import HWND, UINT, LPCWSTR, BOOL
-
-                SHFileOperationW = windll.shell32.SHFileOperationW
-
-                class SHFILEOPSTRUCTW(ctypes.Structure):
-                    _fields_ = [
-                        ("hwnd", HWND),
-                        ("wFunc", UINT),
-                        ("pFrom", LPCWSTR),
-                        ("pTo", LPCWSTR),
-                        ("fFlags", UINT),
-                        ("fAnyOperationsAborted", BOOL),
-                        ("hNameMappings", ctypes.c_void_p),
-                        ("lpszProgressTitle", LPCWSTR)
-                    ]
-
-                FO_DELETE = 3
-                FOF_ALLOWUNDO = 0x40  # 允许撤销（移动到回收站）
-                FOF_NOCONFIRMATION = 0x10  # 不显示确认对话框
-
-                # 添加结束空字符和额外的空字符
-                path = file_path + '\0\0'
-
-                fileop = SHFILEOPSTRUCTW(
-                    None,  # hwnd
-                    FO_DELETE,  # wFunc
-                    path,  # pFrom
-                    None,  # pTo
-                    FOF_ALLOWUNDO | FOF_NOCONFIRMATION,  # fFlags
-                    None,  # fAnyOperationsAborted
-                    None,  # hNameMappings
-                    None  # lpszProgressTitle
-                )
-
-                result = SHFileOperationW(ctypes.byref(fileop))
-                if result == 0:
-                    logger.info(f"已删除文件到回收站: {file_path}")
-                else:
-                    # 如果API调用失败，则直接删除
-                    os.remove(file_path)
-                    logger.info(f"已直接删除文件: {file_path}")
-            except Exception as e:
-                # 如果出错，则直接删除
-                os.remove(file_path)
-                logger.info(f"已直接删除文件: {file_path}")
-
+            # 安全删除文件（优先移入回收站，失败则直接删除）
+            self._delete_file(file_path)
             return file_size
+        except FileInUseError:
+            raise
         except Exception as e:
             logger.error(f"清理文件 {file_path} 失败: {e}")
             raise
 
-    def _clean_directory(self, dir_path, backup_dir=None):
-        """清理目录"""
+    def _delete_file(self, file_path):
+        """删除单个文件：先尝试移入回收站，失败后直接删除。
+
+        文件被占用时抛出 FileInUseError，调用方可安全跳过。
+        """
+        # 尝试使用 Windows API 移动到回收站，失败则回退到直接删除
+        try:
+            import ctypes
+            from ctypes import windll
+            from ctypes.wintypes import HWND, UINT, LPCWSTR, BOOL
+
+            SHFileOperationW = windll.shell32.SHFileOperationW
+
+            class SHFILEOPSTRUCTW(ctypes.Structure):
+                _fields_ = [
+                    ("hwnd", HWND),
+                    ("wFunc", UINT),
+                    ("pFrom", LPCWSTR),
+                    ("pTo", LPCWSTR),
+                    ("fFlags", UINT),
+                    ("fAnyOperationsAborted", BOOL),
+                    ("hNameMappings", ctypes.c_void_p),
+                    ("lpszProgressTitle", LPCWSTR),
+                ]
+
+            FO_DELETE = 3
+            FOF_ALLOWUNDO = 0x40  # 允许撤销（移动到回收站）
+            FOF_NOCONFIRMATION = 0x10  # 不显示确认对话框
+            FOF_SILENT = 0x04  # 不显示进度对话框
+            FOF_NOERRORUI = 0x0400  # 不弹出系统错误对话框（占用等由本程序处理）
+
+            # 添加结束空字符和额外的空字符
+            path = file_path + '\0\0'
+
+            fileop = SHFILEOPSTRUCTW(
+                None,  # hwnd
+                FO_DELETE,  # wFunc
+                path,  # pFrom
+                None,  # pTo
+                FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI,  # fFlags
+                None,  # fAnyOperationsAborted
+                None,  # hNameMappings
+                None,  # lpszProgressTitle
+            )
+
+            if SHFileOperationW(ctypes.byref(fileop)) == 0:
+                logger.info(f"已删除文件到回收站: {file_path}")
+                return
+        except FileInUseError:
+            raise
+        except Exception as e:
+            logger.warning(f"移入回收站失败，尝试直接删除 {file_path}: {e}")
+
+        # 回退：直接删除
+        try:
+            os.remove(file_path)
+            logger.info(f"已直接删除文件: {file_path}")
+        except FileNotFoundError:
+            return  # 已经被删除，视为成功
+        except (PermissionError, OSError) as e:
+            if is_file_in_use_error(e):
+                raise FileInUseError(file_path) from e
+            raise
+
+    def _clean_directory(self, dir_path, backup_dir=None, skipped=None):
+        """清理目录。被占用的文件记入 skipped（若提供），不作为错误。"""
         try:
             if not os.path.exists(dir_path):
                 return 0
@@ -440,9 +500,8 @@ class CleanerLogic:
             # 实际清理目录
             for root, dirs, files in os.walk(dir_path, topdown=False):
                 for file in files:
+                    file_path = os.path.join(root, file)
                     try:
-                        file_path = os.path.join(root, file)
-
                         # 备份文件
                         if backup_dir:
                             try:
@@ -459,8 +518,15 @@ class CleanerLogic:
                             os.remove(file_path)
                             total_freed += file_size
                             logger.info(f"已删除文件: {file_path}")
-                    except (PermissionError, FileNotFoundError) as e:
-                        logger.warning(f"删除文件 {os.path.join(root, file)} 失败: {e}")
+                    except FileNotFoundError:
+                        pass
+                    except (PermissionError, OSError) as e:
+                        if is_file_in_use_error(e):
+                            logger.info(f"跳过正在使用的文件: {file_path}")
+                            if skipped is not None:
+                                skipped.append({'path': file_path, 'reason': '文件正在使用'})
+                        else:
+                            logger.warning(f"删除文件 {file_path} 失败: {e}")
 
                 # 删除空目录
                 for dir_name in dirs:
@@ -469,7 +535,7 @@ class CleanerLogic:
                         if os.path.exists(dir_to_remove) and not os.listdir(dir_to_remove):
                             os.rmdir(dir_to_remove)
                             logger.info(f"已删除空目录: {dir_to_remove}")
-                    except (PermissionError, FileNotFoundError) as e:
+                    except (PermissionError, FileNotFoundError, OSError) as e:
                         logger.warning(f"删除目录 {os.path.join(root, dir_name)} 失败: {e}")
 
             return total_freed

@@ -19,6 +19,7 @@ import glob
 import datetime
 
 from .scan_strategy import ScanStrategy, logger
+from .file_lock import is_deletable
 
 # 匹配 %ENVVAR% 形式的环境变量
 _ENV_VAR_RE = re.compile(r'%([^%]+)%')
@@ -104,6 +105,11 @@ class IoScanStrategy(ScanStrategy):
                 )
                 if mod_time >= self._mtime_threshold:
                     return
+
+            # 扫描阶段剔除当前删不掉的文件（被占用/无权限）
+            if context.skip_locked and not is_deletable(file_path):
+                context.mark_skipped_locked()
+                return
 
             context.add(self.key, {
                 'path': file_path,
