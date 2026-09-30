@@ -4,9 +4,13 @@
 """
 扫描策略包
 
-使用策略模式组织各扫描类型：
-- 策略模式：每个扫描类型是一个 ScanStrategy 子类（scanners/ 下的独立文件）
-- 动态加载：registry.py 通过 key -> import path 的映射，按配置动态获取策略类
+- base.py     ：ScanStrategy（策略接口）、ScanContext
+- targets.py  ：所有扫描目标与路径配置（单一数据源）
+- generic.py  ：配置驱动的通用目录/文件扫描器（os.walk）
+- mft.py      ：MFT 后端与 MFT 优先的通用扫描器（不支持时回退 generic）
+- registry.py ：按 targets 配置实例化全部扫描策略
+- dedicated/  ：无法用配置表达的专用扫描器（浏览器缓存、媒体缓存、
+                应用日志、安装程序缓存、大文件等）
 """
 
 from .base import (
@@ -14,8 +18,16 @@ from .base import (
     ScanContext,
     dir_total_size,
 )
+from .targets import (
+    SCAN_TARGETS,
+    CATEGORY_NAMES,
+)
+from .generic import DirectoryScanner
+from .mft import (
+    MftBackend,
+    MftDirectoryScanner,
+)
 from .registry import (
-    SCANNER_REGISTRY,
     ALL_RESULT_KEYS,
     load_strategy_class,
     build_strategies,
@@ -25,7 +37,11 @@ __all__ = [
     'ScanStrategy',
     'ScanContext',
     'dir_total_size',
-    'SCANNER_REGISTRY',
+    'SCAN_TARGETS',
+    'CATEGORY_NAMES',
+    'DirectoryScanner',
+    'MftBackend',
+    'MftDirectoryScanner',
     'ALL_RESULT_KEYS',
     'load_strategy_class',
     'build_strategies',

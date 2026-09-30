@@ -5,7 +5,7 @@
 
 import os
 
-from .base import ScanStrategy, logger
+from scanners.base import ScanStrategy, logger
 
 
 class BrowserCacheScanner(ScanStrategy):

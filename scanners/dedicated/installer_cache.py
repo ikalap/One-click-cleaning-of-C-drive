@@ -6,7 +6,7 @@
 import os
 import datetime
 
-from .base import ScanStrategy, logger
+from scanners.base import ScanStrategy, logger
 
 
 class InstallerCacheScanner(ScanStrategy):

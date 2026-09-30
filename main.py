@@ -16,54 +16,7 @@ import queue
 from config import APP_NAME, VERSION
 from cleaner_logic import CleanerLogic
 from backup_manager import BackupManagerWindow
-from scanners import ALL_RESULT_KEYS
-
-# 结果分类 key -> 显示名称（与 scanners 注册表保持一致的展示顺序）
-CATEGORY_NAMES = {
-    # 基本清理
-    'temp': "临时文件",
-    'recycle': "回收站",
-    'cache': "浏览器缓存",
-    'logs': "系统日志",
-    'updates': "Windows更新缓存",
-    'thumbnails': "缩略图缓存",
-
-    # 扩展清理
-    'prefetch': "预读取文件",
-    'old_windows': "旧Windows文件",
-    'error_reports': "错误报告",
-    'service_packs': "服务包备份",
-    'memory_dumps': "内存转储文件",
-    'font_cache': "字体缓存",
-    'disk_cleanup': "磁盘清理备份",
-
-    # 新增安全清理项
-    'app_cache': "应用程序缓存",
-    'media_cache': "媒体播放器缓存",
-    'search_index': "搜索索引临时文件",
-    'backup_temp': "备份临时文件",
-    'update_temp': "更新临时文件",
-    'driver_backup': "驱动备份",
-    'app_crash': "应用程序崩溃转储",
-    'app_logs': "应用程序日志",
-    'recent_items': "最近使用的文件列表",
-    'notification': "Windows通知缓存",
-    'dns_cache': "DNS缓存",
-    'network_cache': "网络缓存",
-    'printer_temp': "打印机临时文件",
-    'device_temp': "设备临时文件",
-    'windows_defender': "Windows Defender缓存",
-    'store_cache': "Windows Store缓存",
-    'onedrive_cache': "OneDrive缓存",
-
-    # 新增用户请求的清理项
-    'downloads': "下载文件夹(立即清理)",
-    'installer_cache': "安装程序缓存(30天前)",
-    'delivery_opt': "Windows传递优化缓存(立即清理)",
-
-    # 大文件扫描
-    'large_files': "大文件 (>100MB)",
-}
+from scanners import ALL_RESULT_KEYS, CATEGORY_NAMES
 
 # 配置日志
 logging.basicConfig(
@@ -424,65 +377,15 @@ class CleanerApp(tk.Tk):
         # 获取选中的项目
         self.selected_items = []
         
-        # 获取 categories 字典，与 populate_results_tree 方法中定义的一致
-        categories = {
-            # 基本清理
-            'temp': "临时文件",
-            'recycle': "回收站",
-            'cache': "浏览器缓存",
-            'logs': "系统日志",
-            'updates': "Windows更新缓存",
-            'thumbnails': "缩略图缓存",
+        # 分类节点 id -> 结果 key（避免依赖显示名称反查）
+        id_to_key = {cid: key for key, cid in self._tree_category_ids.items()}
 
-            # 扩展清理
-            'prefetch': "预读取文件",
-            'old_windows': "旧Windows文件",
-            'error_reports': "错误报告",
-            'service_packs': "服务包备份",
-            'memory_dumps': "内存转储文件",
-            'font_cache': "字体缓存",
-            'disk_cleanup': "磁盘清理备份",
-
-            # 新增安全清理项
-            'app_cache': "应用程序缓存",
-            'media_cache': "媒体播放器缓存",
-            'search_index': "搜索索引临时文件",
-            'backup_temp': "备份临时文件",
-            'update_temp': "更新临时文件",
-            'driver_backup': "驱动备份",
-            'app_crash': "应用程序崩溃转储",
-            'app_logs': "应用程序日志",
-            'recent_items': "最近使用的文件列表",
-            'notification': "Windows通知缓存",
-            'dns_cache': "DNS缓存",
-            'network_cache': "网络缓存",
-            'printer_temp': "打印机临时文件",
-            'device_temp': "设备临时文件",
-            'windows_defender': "Windows Defender缓存",
-            'store_cache': "Windows Store缓存",
-            'onedrive_cache': "OneDrive缓存",
-
-            # 新增用户请求的清理项
-            'downloads': "下载文件夹(立即清理)",
-            'installer_cache': "安装程序缓存(30天前)",
-            'delivery_opt': "Windows传递优化缓存(立即清理)",
-
-            # 大文件扫描
-            'large_files': "大文件"
-        }
-        
-        # 使用反向映射从显示名称找到类别键
-        display_to_key = {v: k for k, v in categories.items()}
-        
         for category_id in self.result_tree.get_children():
+            category_key = id_to_key.get(category_id)
+            if not category_key:
+                continue
             for item_id in self.result_tree.get_children(category_id):
                 if self.result_tree.item(item_id, 'values')[-1] == '是':  # 检查"选中"列
-                    # 从结果数据中找到对应的项目
-                    category = self.result_tree.item(category_id, 'text').split()[0]  # 获取分类名称
-                    category_key = display_to_key.get(category)
-                    if not category_key:
-                        continue
-
                     item_path = self.result_tree.item(item_id, 'values')[2]  # 路径在第三列
                     for item in self.scan_results.get(category_key, []):
                         if item['path'] == item_path:

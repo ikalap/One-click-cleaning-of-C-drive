@@ -6,7 +6,7 @@
 import os
 import glob
 
-from .base import ScanStrategy, dir_total_size, logger
+from scanners.base import ScanStrategy, dir_total_size, logger
 
 
 class MediaCacheScanner(ScanStrategy):

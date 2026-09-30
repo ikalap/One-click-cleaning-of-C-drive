@@ -7,7 +7,7 @@ import os
 import glob
 import datetime
 
-from .base import ScanStrategy, logger
+from scanners.base import ScanStrategy, logger
 
 
 class AppLogsScanner(ScanStrategy):

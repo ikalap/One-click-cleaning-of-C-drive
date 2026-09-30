@@ -40,6 +40,8 @@ def build_exe():
         '--windowed',  # 无控制台窗口
         '--icon=' + icon_path,  # 图标
         add_data,  # 包含图标文件夹
+        '--hidden-import=mftparser',  # MFT 扩展（try/except 导入，显式声明）
+        '--collect-submodules=scanners',  # registry 用 importlib 动态导入 dedicated 模块
         '--noconfirm',  # 不询问覆盖
         '--clean',  # 清理临时文件
         '--specpath=dist',  # spec文件输出到dist目录
