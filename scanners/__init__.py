@@ -28,7 +28,6 @@ from .mft import (
 )
 from .registry import (
     ALL_RESULT_KEYS,
-    load_strategy_class,
     build_strategies,
 )
 
@@ -41,6 +40,5 @@ __all__ = [
     'MftBackend',
     'MftDirectoryScanner',
     'ALL_RESULT_KEYS',
-    'load_strategy_class',
     'build_strategies',
 ]

@@ -5,12 +5,12 @@
 
 所有扫描目标集中定义在 targets.py（单一数据源）：
 
-- 通用目标：优先由 mft.MftDirectoryScanner 使用 MFT 扫描，
-  不支持 MFT 时自动回退到 generic.DirectoryScanner 的目录遍历
+- 通用目标：由单个 mft.MftDirectoryScanner 实例统一负责，
+  优先使用 MFT，不支持时自动回退到 os.walk
 - 专用目标：通过 dedicated 字段动态 import 独立策略类
 
-build_strategies() 按 SCAN_TARGETS 的顺序实例化全部策略，
-该顺序同时决定 UI 中分类的展示顺序。
+build_strategies() 只实例化「1 个通用策略 + N 个专用策略」，
+不再为每个分类 key 各创建一个实例。
 """
 
 import importlib
@@ -22,28 +22,16 @@ from .mft import MftDirectoryScanner
 ALL_RESULT_KEYS = list(SCAN_TARGETS.keys())
 
 
-def load_strategy_class(key):
-    """根据 key 获取策略类
-
-    通用目标返回绑定好配置的 MftDirectoryScanner（内部按需回退到目录遍历）。
-    """
-    spec = SCAN_TARGETS[key]
-
-    if 'dedicated' in spec:
-        module_name, class_name = spec['dedicated'].rsplit('.', 1)
-        module = importlib.import_module(module_name)
-        return getattr(module, class_name)
-
-    class _ConfiguredScanner(MftDirectoryScanner):
-        def __init__(self):
-            super().__init__(key=key, spec=spec)
-
-    return _ConfiguredScanner
-
-
 def build_strategies():
-    """按注册表顺序实例化全部策略"""
-    return [
-        load_strategy_class(key)()
-        for key in SCAN_TARGETS
-    ]
+    """实例化全部策略：1 个通用策略 + 各专用策略各 1 个"""
+    strategies = [MftDirectoryScanner()]
+
+    for spec in SCAN_TARGETS.values():
+        path = spec.get('dedicated')
+        if not path:
+            continue
+        module_name, class_name = path.rsplit('.', 1)
+        module = importlib.import_module(module_name)
+        strategies.append(getattr(module, class_name)())
+
+    return strategies

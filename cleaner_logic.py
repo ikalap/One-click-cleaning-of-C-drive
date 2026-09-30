@@ -295,8 +295,9 @@ class CleanerLogic:
         results = {key: [] for key in ALL_RESULT_KEYS}
 
         # 策略模式：按注册表动态实例化各扫描策略类（scanners/*.py）
+        # 一个策略可负责多个结果 key，进度按 key 数统计
         strategies = build_strategies()
-        total = len(strategies)
+        total = sum(len(s.keys) for s in strategies)
 
         # 进度状态（被多个扫描线程共享，需要加锁）
         state_lock = threading.Lock()
@@ -312,18 +313,20 @@ class CleanerLogic:
             progress_callback(completed, total, active, finished_key, items or [])
 
         def run_strategy(strategy):
-            """执行单个扫描器，并在开始/结束时上报进度"""
+            """执行单个扫描器，并按它负责的每个 key 上报进度"""
+            keys = strategy.keys
             with state_lock:
-                state['active'].add(strategy.key)
+                state['active'].update(keys)
             notify()
             try:
                 strategy.scan(context)
             finally:
-                with state_lock:
-                    state['active'].discard(strategy.key)
-                    state['completed'] += 1
-                # 无论成功与否都算完成一个扫描器，并实时上报结果
-                notify(strategy.key, list(results.get(strategy.key, [])))
+                for key in keys:
+                    with state_lock:
+                        state['active'].discard(key)
+                        state['completed'] += 1
+                    # 无论成功与否都算完成，并实时上报该分类结果
+                    notify(key, list(results.get(key, [])))
 
         # 通知起始状态（0/total）
         notify()

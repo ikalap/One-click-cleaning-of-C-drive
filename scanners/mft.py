@@ -44,6 +44,10 @@ def _has_glob(path):
     return any(ch in path for ch in _GLOB_CHARS)
 
 
+# 由通用扫描器负责的全部结果 key（SCAN_TARGETS 中未标 dedicated 的项）
+GENERAL_KEYS = [key for key, spec in SCAN_TARGETS.items() if 'dedicated' not in spec]
+
+
 class MftBackend:
     """进程级 MFT 后端（全盘只扫描一次，结果供所有通用扫描器共享）"""
 
@@ -233,20 +237,25 @@ def _distribute(entries, context):
 
 
 class MftDirectoryScanner(ScanStrategy):
-    """通用扫描器：优先 MFT，MFT 不可用时回退到 os.walk
+    """通用扫描器：单个实例负责 SCAN_TARGETS 中所有通用路径
 
-    实际结果由 MftBackend 一次性构建，本类只负责取回自己 key 的结果；
-    回退时复用 generic.DirectoryScanner 的完整逻辑。
+    优先使用 MFT：结果由 MftBackend 一次性构建并写入各个分类的 key。
+    MFT 不可用时，逐个通用目标临时创建 DirectoryScanner 回退到 os.walk。
     """
 
-    def __init__(self, key=None, spec=None):
-        self.key = key or ''
-        self.spec = spec or {}
-        self.display_name = self.spec.get('display_name', self.key)
-        self._fallback = DirectoryScanner(key=key, spec=spec)
+    display_name = '通用扫描'
+
+    @property
+    def keys(self):
+        return list(GENERAL_KEYS)
 
     def scan(self, context):
         if MftBackend.ensure(context):
-            context.extend(self.key, MftBackend.results().get(self.key, []))
-        else:
-            self._fallback.scan(context)
+            results = MftBackend.results()
+            for key in GENERAL_KEYS:
+                context.extend(key, results.get(key, []))
+            return
+
+        logger.info("MFT 方式不可用，回退到目录遍历")
+        for key in GENERAL_KEYS:
+            DirectoryScanner(key=key, spec=SCAN_TARGETS[key]).scan(context)
