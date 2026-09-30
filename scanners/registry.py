@@ -35,16 +35,15 @@ def load_strategy_class(key):
         return getattr(module, class_name)
 
     class _ConfiguredScanner(MftDirectoryScanner):
-        def __init__(self, config=None):
-            super().__init__(config=config, key=key, spec=spec)
+        def __init__(self):
+            super().__init__(key=key, spec=spec)
 
     return _ConfiguredScanner
 
 
-def build_strategies(config=None):
+def build_strategies():
     """按注册表顺序实例化全部策略"""
-    config = config or {}
     return [
-        load_strategy_class(key)(config=config)
+        load_strategy_class(key)()
         for key in SCAN_TARGETS
     ]

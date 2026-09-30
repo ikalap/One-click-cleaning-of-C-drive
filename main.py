@@ -167,9 +167,8 @@ class CleanerApp(tk.Tk):
         self.progress_bar.pack(fill=tk.X)
         self.progress_bar.start()
 
-        # 预估计启用的扫描器总数，先显示 0/总数
-        scan_items = self.cleaner.options.get('scan_items', {})
-        total = sum(1 for enabled in scan_items.values() if enabled) if scan_items else len(ALL_RESULT_KEYS)
+        # 预估扫描器总数，先显示 0/总数
+        total = len(ALL_RESULT_KEYS)
 
         # 初始化扫描进度与计时，并启动实时刷新
         self._scan_start_time = time.monotonic()

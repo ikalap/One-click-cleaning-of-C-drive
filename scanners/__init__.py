@@ -16,7 +16,6 @@
 from .base import (
     ScanStrategy,
     ScanContext,
-    dir_total_size,
 )
 from .targets import (
     SCAN_TARGETS,
@@ -36,7 +35,6 @@ from .registry import (
 __all__ = [
     'ScanStrategy',
     'ScanContext',
-    'dir_total_size',
     'SCAN_TARGETS',
     'CATEGORY_NAMES',
     'DirectoryScanner',

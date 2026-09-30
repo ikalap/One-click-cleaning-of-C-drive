@@ -29,8 +29,7 @@ _GLOB_CHARS = ('*', '?', '[')
 class DirectoryScanner(ScanStrategy):
     """配置驱动的通用扫描器"""
 
-    def __init__(self, config=None, key=None, spec=None):
-        super().__init__(config)
+    def __init__(self, key=None, spec=None):
         self.key = key or ''
         self.spec = spec or {}
         self.display_name = self.spec.get('display_name', self.key)

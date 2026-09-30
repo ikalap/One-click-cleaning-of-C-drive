@@ -15,20 +15,6 @@ from abc import ABC, abstractmethod
 logger = logging.getLogger('CCleaner')
 
 
-def dir_total_size(path):
-    """递归计算目录内所有文件的总大小（跳过无权限/已消失的文件）"""
-    total = 0
-    for root, _, files in os.walk(path):
-        for f in files:
-            fp = os.path.join(root, f)
-            try:
-                if os.path.isfile(fp):
-                    total += os.path.getsize(fp)
-            except (PermissionError, FileNotFoundError):
-                pass
-    return total
-
-
 class ScanContext:
     """扫描上下文：所有扫描策略共享的结果容器与工具方法"""
 
@@ -71,23 +57,6 @@ class ScanStrategy(ABC):
     key = ''            # 结果字典中的键，与 UI 的分类一致
     display_name = ''   # 显示名称
 
-    def __init__(self, config=None):
-        self.config = config or {}
-
     @abstractmethod
     def scan(self, context):
         """执行扫描，将结果写入 context.results[self.key]"""
-
-    def is_enabled(self, config=None):
-        """根据配置判断该策略是否启用，默认启用
-
-        config 支持两种形式：
-        - dict：{'temp': True, 'cache': False}，缺省视为启用
-        - set/list：{'temp', 'cache'}，在集合中的视为启用，其余禁用
-        """
-        cfg = config if config is not None else self.config
-        if cfg is None:
-            return True
-        if isinstance(cfg, dict):
-            return cfg.get(self.key, True)
-        return self.key in cfg

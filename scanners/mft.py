@@ -239,12 +239,11 @@ class MftDirectoryScanner(ScanStrategy):
     回退时复用 generic.DirectoryScanner 的完整逻辑。
     """
 
-    def __init__(self, config=None, key=None, spec=None):
-        super().__init__(config)
+    def __init__(self, key=None, spec=None):
         self.key = key or ''
         self.spec = spec or {}
         self.display_name = self.spec.get('display_name', self.key)
-        self._fallback = DirectoryScanner(config=config, key=key, spec=spec)
+        self._fallback = DirectoryScanner(key=key, spec=spec)
 
     def scan(self, context):
         if MftBackend.ensure(context):

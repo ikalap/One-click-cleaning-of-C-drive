@@ -39,8 +39,6 @@ class CleanerLogic:
         """初始化清理器"""
         self.options = {
             'backup': True,     # 默认备份文件
-            # 扫描项配置：key -> 是否启用（默认全部启用，可在 set_options 中覆盖）
-            'scan_items': {key: True for key in ALL_RESULT_KEYS},
         }
 
         # 安全路径列表 - 这些路径不会被扫描或清理
@@ -280,16 +278,13 @@ class CleanerLogic:
             logger.error(f"恢复备份失败: {e}")
             return False
 
-    def scan_system(self, enabled_items=None, progress_callback=None):
-        """扫描系统中可清理的文件（根据配置动态加载扫描策略）
+    def scan_system(self, progress_callback=None):
+        """扫描系统中可清理的文件（根据注册表动态加载扫描策略）
 
         参数：
-            enabled_items: 可选，dict 或集合，指定启用的扫描项。
-                          例如 {'temp': True, 'cache': False} 或 {'temp', 'cache'}。
-                          为 None 时使用 self.options['scan_items']（默认全部启用）。
             progress_callback: 可选，扫描进度回调。扫描器开始/完成时各调用一次，
                           签名为 callback(completed, total, active, finished_key, items)：
-                          completed 已完成的扫描器数量，total 启用的扫描器总数，
+                          completed 已完成的扫描器数量，total 扫描器总数，
                           active 当前正在扫描的扫描器键列表，
                           finished_key 刚完成的扫描器键（开始通知时为 None），
                           items 该扫描器找到的项目列表（开始通知时为 []）。
@@ -299,15 +294,9 @@ class CleanerLogic:
         # 结果字典：key 与 UI 分类保持一致
         results = {key: [] for key in ALL_RESULT_KEYS}
 
-        # 扫描配置
-        config = enabled_items if enabled_items is not None else self.options.get('scan_items', {})
-
-        # 1. 策略模式：按注册表动态实例化各扫描策略类（scanners/*.py）
-        strategies = build_strategies(config)
-
-        # 2. 按配置过滤出启用的扫描策略
-        enabled_strategies = [s for s in strategies if s.is_enabled(config)]
-        total = len(enabled_strategies)
+        # 策略模式：按注册表动态实例化各扫描策略类（scanners/*.py）
+        strategies = build_strategies()
+        total = len(strategies)
 
         # 进度状态（被多个扫描线程共享，需要加锁）
         state_lock = threading.Lock()
@@ -344,7 +333,7 @@ class CleanerLogic:
         with concurrent.futures.ThreadPoolExecutor() as executor:
             future_to_strategy = {
                 executor.submit(run_strategy, strategy): strategy
-                for strategy in enabled_strategies
+                for strategy in strategies
             }
 
             for future in concurrent.futures.as_completed(future_to_strategy):

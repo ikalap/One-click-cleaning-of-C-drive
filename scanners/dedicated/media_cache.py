@@ -6,7 +6,7 @@
 import os
 import glob
 
-from scanners.base import ScanStrategy, dir_total_size, logger
+from scanners.base import ScanStrategy, logger
 
 
 class MediaCacheScanner(ScanStrategy):
@@ -53,3 +53,16 @@ class MediaCacheScanner(ScanStrategy):
                         })
                 except (PermissionError, FileNotFoundError) as e:
                     logger.warning(f"无法访问媒体缓存 {cache_dir}: {e}")
+
+def dir_total_size(path):
+    """递归计算目录内所有文件的总大小（跳过无权限/已消失的文件）"""
+    total = 0
+    for root, _, files in os.walk(path):
+        for f in files:
+            fp = os.path.join(root, f)
+            try:
+                if os.path.isfile(fp):
+                    total += os.path.getsize(fp)
+            except (PermissionError, FileNotFoundError):
+                pass
+    return total
