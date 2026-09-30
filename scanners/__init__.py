@@ -21,10 +21,10 @@ from .scan_targets_config import (
     SCAN_TARGETS,
     CATEGORY_NAMES,
 )
-from .io_scan_strategy import DirectoryScanner
+from .io_scan_strategy import IoScanStrategy
 from .mft_scan_strategy import (
     MftBackend,
-    MftDirectoryScanner,
+    MftScanStrategy,
 )
 from .scan_strategy_context import (
     ALL_RESULT_KEYS,
@@ -37,9 +37,9 @@ __all__ = [
     'ScanStrategy',
     'SCAN_TARGETS',
     'CATEGORY_NAMES',
-    'DirectoryScanner',
+    'IoScanStrategy',
     'MftBackend',
-    'MftDirectoryScanner',
+    'MftScanStrategy',
     'ALL_RESULT_KEYS',
     'build_dedicated_strategies',
     'ScanStrategyContext',

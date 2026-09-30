@@ -22,10 +22,10 @@ import threading
 import concurrent.futures
 
 from .scan_targets_config import SCAN_TARGETS
-from .io_scan_strategy import DirectoryScanner
+from .io_scan_strategy import IoScanStrategy
 from .mft_scan_strategy import (
     MftBackend,
-    MftDirectoryScanner,
+    MftScanStrategy,
     GENERAL_KEYS,
     mftparser,
 )
@@ -179,12 +179,12 @@ class ScanStrategyContext:
         """协调通用扫描策略：优先 MFT，不可用则回退 IO(os.walk)"""
         if self.prefer_mft and self._mft_supported():
             logger.info("通用扫描使用 MFT 策略")
-            return [MftDirectoryScanner()]
+            return [MftScanStrategy()]
 
         logger.info("通用扫描使用 IO(os.walk) 策略")
         # 通用扫描没有单一 IO 策略类，按通用 key 各建一个 DirectoryScanner
         return [
-            DirectoryScanner(key=key, spec=SCAN_TARGETS[key])
+            IoScanStrategy(key=key, spec=SCAN_TARGETS[key])
             for key in GENERAL_KEYS
         ]
 
@@ -283,7 +283,7 @@ class ScanStrategyContext:
         keys = strategy.keys
         progress.start(keys)
         try:
-            if isinstance(strategy, MftDirectoryScanner) and not self._ensure_mft_entries():
+            if isinstance(strategy, MftScanStrategy) and not self._ensure_mft_entries():
                 # 协调：MFT 通用策略不可用时回退到 IO(os.walk)
                 self._scan_general_with_io(keys)
             else:
@@ -296,4 +296,4 @@ class ScanStrategyContext:
     def _scan_general_with_io(self, keys):
         """通用扫描回退：按 key 逐个使用 IO(os.walk) 策略扫描"""
         for key in keys:
-            DirectoryScanner(key=key, spec=SCAN_TARGETS[key]).scan(self)
+            IoScanStrategy(key=key, spec=SCAN_TARGETS[key]).scan(self)

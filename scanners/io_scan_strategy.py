@@ -26,7 +26,7 @@ _ENV_VAR_RE = re.compile(r'%([^%]+)%')
 _GLOB_CHARS = ('*', '?', '[')
 
 
-class DirectoryScanner(ScanStrategy):
+class IoScanStrategy(ScanStrategy):
     """配置驱动的通用扫描器"""
 
     def __init__(self, key=None, spec=None):

@@ -180,7 +180,7 @@ def _distribute(entries, context):
     return results
 
 
-class MftDirectoryScanner(ScanStrategy):
+class MftScanStrategy(ScanStrategy):
     """通用扫描器：使用 MFT 一次性产出所有通用分类结果
 
     扫描上下文（ScanStrategyContext）负责 MFT 可用性判断、条目缓存与回退；
