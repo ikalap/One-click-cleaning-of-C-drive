@@ -5,7 +5,7 @@
 C盘清理工具 - 核心清理逻辑
 
 扫描部分使用「策略模式」组织，各扫描类型位于 scanners/ 包下：
-- scanners/base.py      ：ScanStrategy（策略接口）、ScanContext
+- scanners/scan_strategy.py      ：ScanStrategy（策略接口）、ScanContext
 - scanners/registry.py  ：key -> import path 注册表，按配置动态加载策略类
 - scanners/*.py         ：每个扫描类型一个类，独立文件
 """

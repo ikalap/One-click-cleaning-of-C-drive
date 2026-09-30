@@ -18,7 +18,7 @@ import re
 import glob
 import datetime
 
-from .base import ScanStrategy, logger
+from .scan_strategy import ScanStrategy, logger
 
 # 匹配 %ENVVAR% 形式的环境变量
 _ENV_VAR_RE = re.compile(r'%([^%]+)%')

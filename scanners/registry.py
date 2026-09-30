@@ -16,7 +16,7 @@ build_strategies() 只实例化「1 个通用策略 + N 个专用策略」，
 import importlib
 
 from .targets import SCAN_TARGETS
-from .mft import MftDirectoryScanner
+from .mft_scan_strategy import MftDirectoryScanner
 
 # 所有扫描结果的 key，与 UI 分类保持一致（顺序即展示顺序）
 ALL_RESULT_KEYS = list(SCAN_TARGETS.keys())

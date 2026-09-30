@@ -17,8 +17,8 @@ import itertools
 import threading
 import concurrent.futures
 
-from scanners.base import ScanStrategy, logger
-from scanners.mft import MftBackend, IDX_PATH, IDX_SIZE, IDX_IS_DIR
+from scanners.scan_strategy import ScanStrategy, logger
+from scanners.mft_scan_strategy import MftBackend, IDX_PATH, IDX_SIZE, IDX_IS_DIR
 
 
 class LargeFilesScanner(ScanStrategy):

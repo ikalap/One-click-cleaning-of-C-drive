@@ -17,8 +17,8 @@ import fnmatch
 import datetime
 import threading
 
-from .base import ScanStrategy, logger
-from .generic import DirectoryScanner
+from .scan_strategy import ScanStrategy, logger
+from .io_scan_strategy import DirectoryScanner
 from .targets import SCAN_TARGETS
 
 try:

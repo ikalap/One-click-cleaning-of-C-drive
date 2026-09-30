@@ -4,16 +4,16 @@
 """
 扫描策略包
 
-- base.py     ：ScanStrategy（策略接口）、ScanContext
+- scan_strategy.py     ：ScanStrategy（策略接口）、ScanContext
 - targets.py  ：所有扫描目标与路径配置（单一数据源）
-- generic.py  ：配置驱动的通用目录/文件扫描器（os.walk）
-- mft.py      ：MFT 后端与 MFT 优先的通用扫描器（不支持时回退 generic）
+- io_scan_strategy.py  ：配置驱动的通用目录/文件扫描器（os.walk）
+- mft_scan_strategy.py      ：MFT 后端与 MFT 优先的通用扫描器（不支持时回退 generic）
 - registry.py ：按 targets 配置实例化全部扫描策略
 - dedicated/  ：无法用配置表达的专用扫描器（浏览器缓存、媒体缓存、
                 应用日志、安装程序缓存、大文件等）
 """
 
-from .base import (
+from .scan_strategy import (
     ScanStrategy,
     ScanContext,
 )
@@ -21,8 +21,8 @@ from .targets import (
     SCAN_TARGETS,
     CATEGORY_NAMES,
 )
-from .generic import DirectoryScanner
-from .mft import (
+from .io_scan_strategy import DirectoryScanner
+from .mft_scan_strategy import (
     MftBackend,
     MftDirectoryScanner,
 )
