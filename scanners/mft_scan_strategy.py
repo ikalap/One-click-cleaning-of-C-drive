@@ -2,28 +2,21 @@
 # -*- coding: utf-8 -*-
 
 """基于 NTFS 主文件表（MFT）的通用扫描后端
-
 对整卷 C 盘只解析一次 MFT，得到所有活跃文件条目，再按
 targets.SCAN_TARGETS 中的通用规则一次性分发，产出各分类结果。
-
-MftDirectoryScanner 与 generic.DirectoryScanner 功能等价，但优先使用 MFT；
-当 mftparser 未安装、缺少管理员权限或磁盘非 NTFS 时，
-MftDirectoryScanner 会自动回退到 os.walk 的 DirectoryScanner。
 """
 
 import os
 import re
 import fnmatch
 import datetime
-import threading
 
 from .scan_strategy import ScanStrategy, logger
-from .io_scan_strategy import DirectoryScanner
 from .scan_targets_config import SCAN_TARGETS
 
 try:
     import mftparser
-except ImportError:  # 未安装 mftparser 时统一回退到目录遍历
+except ImportError:  # 未安装 mftparser 时由 ScanStrategyContext 负责回退
     mftparser = None
 
 # mftparser.ScanVolume() 返回元组的字段索引（实测顺序）
@@ -34,86 +27,37 @@ IDX_IS_DIR = 8    # 是否为目录
 _GLOB_CHARS = ('*', '?', '[')
 _ENV_VAR_RE = re.compile(r'%([^%]+)%')
 
-
 def _expand_env(raw):
     """展开 %ENVVAR% 形式的环境变量，变量缺失时返回空串"""
     return _ENV_VAR_RE.sub(lambda m: os.environ.get(m.group(1), ''), raw)
 
-
 def _has_glob(path):
     return any(ch in path for ch in _GLOB_CHARS)
-
 
 # 由通用扫描器负责的全部结果 key（SCAN_TARGETS 中未标 dedicated 的项）
 GENERAL_KEYS = [key for key, spec in SCAN_TARGETS.items() if 'dedicated' not in spec]
 
 
 class MftBackend:
-    """进程级 MFT 后端（全盘只扫描一次，结果供所有通用扫描器共享）"""
+    """MFT 业务逻辑：解析卷主文件表并按配置分发结果
 
-    _lock = threading.Lock()
-    _initialized = False
-    _available = False
-    _entries = None     # MFT 原始条目（供 large_files 等复用）
-    _results = None     # {key: [items]} 通用扫描项结果
+    只负责业务逻辑，不做可用性判断、不处理回退：mftparser 未安装、
+    缺少管理员权限或磁盘非 NTFS 时直接抛出异常，
+    由 ScanStrategyContext 捕获并决定是否回退到 IO(os.walk) 扫描。
+    """
 
-    @classmethod
-    def ensure(cls, context):
-        """确保后端已初始化，返回 MFT 是否可用"""
-        if cls._initialized:
-            return cls._available
+    @staticmethod
+    def load_entries(volume='C:'):
+        """解析指定卷的 MFT，返回活跃文件条目（失败时抛出异常）"""
+        logger.info(f"使用 MFT 扫描 {volume} 盘...")
+        entries = mftparser.ScanVolume(volume, only_active=True)
+        logger.info(f"MFT 扫描完成，共 {len(entries)} 个活跃条目")
+        return entries
 
-        with cls._lock:
-            if cls._initialized:
-                return cls._available
-
-            entries = cls._load_entries()
-            if entries is None:
-                cls._available = False
-            else:
-                cls._entries = entries
-                cls._results = _distribute(entries, context)
-                cls._available = True
-            cls._initialized = True
-            return cls._available
-
-    @classmethod
-    def _load_entries(cls):
-        if mftparser is None:
-            logger.info("未安装 mftparser，使用目录遍历方式扫描")
-            return None
-        try:
-            logger.info("使用 MFT 扫描 C 盘...")
-            entries = mftparser.ScanVolume('C:', only_active=True)
-            logger.info(f"MFT 扫描完成，共 {len(entries)} 个活跃条目")
-            return entries
-        except Exception as e:
-            logger.warning(
-                f"MFT 扫描失败，改用目录遍历"
-                f"（可能需要管理员权限，或磁盘不是 NTFS）: {e}"
-            )
-            return None
-
-    @classmethod
-    def available(cls):
-        return cls._available
-
-    @classmethod
-    def entries(cls):
-        return cls._entries
-
-    @classmethod
-    def results(cls):
-        return cls._results or {}
-
-    @classmethod
-    def reset(cls):
-        """重置缓存（测试用）"""
-        with cls._lock:
-            cls._initialized = False
-            cls._available = False
-            cls._entries = None
-            cls._results = None
+    @staticmethod
+    def distribute(entries, context):
+        """按 SCAN_TARGETS 的通用规则分发条目，返回 {key: [items]}"""
+        return _distribute(entries, context)
 
 
 def _distribute(entries, context):
@@ -237,10 +181,10 @@ def _distribute(entries, context):
 
 
 class MftDirectoryScanner(ScanStrategy):
-    """通用扫描器：单个实例负责 SCAN_TARGETS 中所有通用路径
+    """通用扫描器：使用 MFT 一次性产出所有通用分类结果
 
-    优先使用 MFT：结果由 MftBackend 一次性构建并写入各个分类的 key。
-    MFT 不可用时，逐个通用目标临时创建 DirectoryScanner 回退到 os.walk。
+    扫描上下文（ScanStrategyContext）负责 MFT 可用性判断、条目缓存与回退；
+    本策略只做业务：拿缓存的条目按配置分发到各分类。
     """
 
     display_name = '通用扫描'
@@ -250,12 +194,10 @@ class MftDirectoryScanner(ScanStrategy):
         return list(GENERAL_KEYS)
 
     def scan(self, context):
-        if MftBackend.ensure(context):
-            results = MftBackend.results()
-            for key in GENERAL_KEYS:
-                context.extend(key, results.get(key, []))
+        entries = context.mft_entries()
+        if entries is None:
             return
 
-        logger.info("MFT 方式不可用，回退到目录遍历")
+        results = MftBackend.distribute(entries, context)
         for key in GENERAL_KEYS:
-            DirectoryScanner(key=key, spec=SCAN_TARGETS[key]).scan(context)
+            context.extend(key, results.get(key, []))

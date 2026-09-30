@@ -5,8 +5,8 @@
 C盘清理工具 - 核心清理逻辑
 
 扫描部分使用「策略模式」组织，各扫描类型位于 scanners/ 包下：
-- scanners/scan_strategy.py      ：ScanStrategy（策略接口）、ScanContext
-- scanners/registry.py  ：key -> import path 注册表，按配置动态加载策略类
+- scanners/scan_strategy.py      ：ScanStrategy（策略接口）
+- scanners/scan_strategy_context.py ：管理策略实例并协调 MFT/IO 后端，含专用策略动态加载
 - scanners/*.py         ：每个扫描类型一个类，独立文件
 """
 
@@ -15,14 +15,8 @@ import shutil
 import tempfile
 import logging
 import datetime
-import threading
-import concurrent.futures
 
-from scanners import (
-    ALL_RESULT_KEYS,
-    ScanContext,
-    build_strategies,
-)
+from scanners import ScanStrategyContext
 
 # 配置日志
 logging.basicConfig(
@@ -279,7 +273,9 @@ class CleanerLogic:
             return False
 
     def scan_system(self, progress_callback=None):
-        """扫描系统中可清理的文件（根据注册表动态加载扫描策略）
+        """扫描系统中可清理的文件
+
+        具体的策略实例管理与 MFT/IO 后端协调由 ScanStrategyContext 负责。
 
         参数：
             progress_callback: 可选，扫描进度回调。扫描器开始/完成时各调用一次，
@@ -289,66 +285,8 @@ class CleanerLogic:
                           finished_key 刚完成的扫描器键（开始通知时为 None），
                           items 该扫描器找到的项目列表（开始通知时为 []）。
         """
-        logger.info("开始扫描系统")
-
-        # 结果字典：key 与 UI 分类保持一致
-        results = {key: [] for key in ALL_RESULT_KEYS}
-
-        # 策略模式：按注册表动态实例化各扫描策略类（scanners/*.py）
-        # 一个策略可负责多个结果 key，进度按 key 数统计
-        strategies = build_strategies()
-        total = sum(len(s.keys) for s in strategies)
-
-        # 进度状态（被多个扫描线程共享，需要加锁）
-        state_lock = threading.Lock()
-        state = {'completed': 0, 'active': set()}
-
-        def notify(finished_key=None, items=None):
-            """向 UI 上报当前进度快照"""
-            if not progress_callback:
-                return
-            with state_lock:
-                completed = state['completed']
-                active = sorted(state['active'])
-            progress_callback(completed, total, active, finished_key, items or [])
-
-        def run_strategy(strategy):
-            """执行单个扫描器，并按它负责的每个 key 上报进度"""
-            keys = strategy.keys
-            with state_lock:
-                state['active'].update(keys)
-            notify()
-            try:
-                strategy.scan(context)
-            finally:
-                for key in keys:
-                    with state_lock:
-                        state['active'].discard(key)
-                        state['completed'] += 1
-                    # 无论成功与否都算完成，并实时上报该分类结果
-                    notify(key, list(results.get(key, [])))
-
-        # 通知起始状态（0/total）
-        notify()
-
-        # 3. 并发执行启用的扫描策略
-        context = ScanContext(results=results, safe_paths=self.safe_paths)
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future_to_strategy = {
-                executor.submit(run_strategy, strategy): strategy
-                for strategy in strategies
-            }
-
-            for future in concurrent.futures.as_completed(future_to_strategy):
-                strategy = future_to_strategy[future]
-                try:
-                    future.result()  # 任务期间发生的任何异常
-                    logger.info(f"Task {strategy.key} completed successfully.")
-                except Exception as exc:
-                    logger.error(f'Task {strategy.key} generated an exception: {exc}')
-
-        logger.info(f"扫描完成，找到 {sum(len(items) for items in results.values())} 个可清理项目")
-        return results
+        strategy_context = ScanStrategyContext(safe_paths=self.safe_paths)
+        return strategy_context.scan(progress_callback=progress_callback)
 
     def clean_selected(self, items, progress_callback=None):
         """清理选中的项目"""

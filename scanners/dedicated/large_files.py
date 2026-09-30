@@ -8,6 +8,9 @@
 
 当 mftparser 不可用（未安装）或读取 MFT 失败（例如缺少管理员权限）时，
 自动回退到基于 os.scandir 的目录遍历方案，保证功能可用。
+
+MFT 可用性由 ScanStrategyContext 统一判断（context.mft_entries() 不可用时返回 None），
+本模块只负责拿到条目后的业务处理与回退。
 """
 
 import os
@@ -18,7 +21,7 @@ import threading
 import concurrent.futures
 
 from scanners.scan_strategy import ScanStrategy, logger
-from scanners.mft_scan_strategy import MftBackend, IDX_PATH, IDX_SIZE, IDX_IS_DIR
+from scanners.mft_scan_strategy import IDX_PATH, IDX_SIZE, IDX_IS_DIR
 
 
 class LargeFilesScanner(ScanStrategy):
@@ -34,8 +37,9 @@ class LargeFilesScanner(ScanStrategy):
     }
 
     def scan(self, context):
-        if MftBackend.ensure(context):
-            items = self._select_from_entries(MftBackend.entries(), context)
+        entries = context.mft_entries()
+        if entries is not None:
+            items = self._select_from_entries(entries, context)
         else:
             logger.info("MFT 方式不可用，回退到目录遍历扫描大文件")
             items = self._scan_walk(context)
